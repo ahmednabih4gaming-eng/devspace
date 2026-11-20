@@ -52,6 +52,7 @@ import { shutdownHttpServer } from "./server-shutdown.js";
 import { formatPathForPrompt } from "./skills.js";
 import { DEVSPACE_VERSION } from "./version.js";
 import { createWorkspaceStore } from "./workspace-store.js";
+import { GoalStore, type GoalStatus } from "./goal-store.js";
 import { WorkspaceActivityJournal } from "./workspace-activity-journal.js";
 import { WorkspaceActivityStore } from "./workspace-activity-store.js";
 import { createWorkspaceWebRouter, WORKSPACE_WEB_PATH, workspaceWebUrl } from "./workspace-web.js";
@@ -852,6 +853,68 @@ function registerMcpSurface(
     config,
     workspaces,
     processSessions,
+  });
+
+  // Host-driven goals persist across MCP connections without starting an
+  // unobservable agent loop or bypassing existing workspace permissions.
+  const goals = new GoalStore();
+  const goalResponse = (value: unknown) => {
+    const result = JSON.stringify(value, null, 2);
+    return { content: [textBlock(result)], structuredContent: { result } };
+  };
+
+  internalTarget.registerTool("create_goal", {
+    title: "Create workspace goal",
+    description: "Record a durable, host-driven coding goal with explicit success criteria. Use existing DevSpace tools to execute it. This does not start a background agent.",
+    inputSchema: {
+      workspace_id: z.string().describe(workspaceIdDescription),
+      title: z.string().trim().min(1).max(1000),
+      success_criteria: z.array(z.string().trim().min(1).max(1000)).min(1).max(30),
+    },
+    outputSchema: resultOutputSchema(),
+  }, async ({ workspace_id, title, success_criteria }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goals.create(workspace.root, title, success_criteria));
+  });
+
+  internalTarget.registerTool("list_goals", {
+    title: "List workspace goals",
+    description: "List durable goals for this workspace, including goals from earlier MCP sessions.",
+    inputSchema: { workspace_id: z.string().describe(workspaceIdDescription) },
+    outputSchema: resultOutputSchema(),
+    annotations: { readOnlyHint: true },
+  }, async ({ workspace_id }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goals.list(workspace.root));
+  });
+
+  internalTarget.registerTool("goal_status", {
+    title: "Inspect workspace goal",
+    description: "Get a saved goal, its success criteria, lifecycle state, and progress events.",
+    inputSchema: {
+      workspace_id: z.string().describe(workspaceIdDescription),
+      goal_id: z.string().uuid(),
+    },
+    outputSchema: resultOutputSchema(),
+    annotations: { readOnlyHint: true },
+  }, async ({ workspace_id, goal_id }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goals.get(workspace.root, goal_id));
+  });
+
+  internalTarget.registerTool("update_goal", {
+    title: "Update workspace goal",
+    description: "Append a verifiable progress note, pause/resume a goal, mark it completed only after verifying its success criteria, or cancel it. Host remains responsible for execution.",
+    inputSchema: {
+      workspace_id: z.string().describe(workspaceIdDescription),
+      goal_id: z.string().uuid(),
+      status: z.enum(["active", "paused", "completed", "cancelled"]),
+      message: z.string().trim().min(1).max(4000),
+    },
+    outputSchema: resultOutputSchema(),
+  }, async ({ workspace_id, goal_id, status, message }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goals.update(workspace.root, goal_id, status as GoalStatus, message));
   });
 
   if (codeModeExecutions) {
