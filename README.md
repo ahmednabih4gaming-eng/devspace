@@ -20,9 +20,11 @@ DevSpace is the agent-agnostic layer between the AI you talk to and the coding
 agents on your machine. It does two things:
 
 > **This fork adds experimental Goal Mode:** durable, workspace-scoped
-> `create_goal`, `goal_status`, `list_goals`, and `update_goal` MCP tools.
-> See [GOAL-MODE.md](GOAL-MODE.md). The connected host remains the orchestrator;
-> these tools do not run an unattended agent or install a native slash command.
+> `create_goal`, `goal_status`, `list_goals`, `update_goal`, `run_goal`,
+> and `stop_goal` MCP tools. See [GOAL-MODE.md](GOAL-MODE.md).
+> `run_goal` can dispatch a bounded local-agent turn that survives an MCP
+> disconnect, but the host remains responsible for verifying completion.
+> These tools do not install a native slash command.
 
 - **Connects MCP hosts to your machine.** ChatGPT, Claude, and proactive agents
   like Grok Bot, OpenClaw, and Hermes open a workspace, read and edit files, run

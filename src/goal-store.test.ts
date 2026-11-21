@@ -42,3 +42,34 @@ test("rejects invalid identifiers before reading files", async (t) => {
   const store = new GoalStore(directory);
   await assert.rejects(store.get("/work", "../../sensitive"), /Invalid goal ID/);
 });
+
+test("bounded agent reservations survive restarts and prevent concurrent runs", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "devspace-goals-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new GoalStore(directory);
+  const goal = await store.create("/work", "Build", ["Smoke test passes"]);
+  const first = await store.reserveRun("/work", goal.id, "codex");
+  assert.equal(first.status, "starting");
+  await assert.rejects(store.reserveRun("/work", goal.id, "codex"), /already running/);
+  await assert.rejects(store.update("/work", goal.id, "completed", "unverified"), /Stop or finish/);
+  await store.updateRun("/work", goal.id, first.agentId, "running");
+  const stopped = await new GoalStore(directory).updateRun("/work", goal.id, first.agentId, "stopped");
+  assert.equal(stopped.runs?.[0]?.status, "stopped");
+  const second = await store.reserveRun("/work", goal.id, "claude");
+  assert.notEqual(second.agentId, first.agentId);
+  await store.updateRun("/work", goal.id, second.agentId, "completed", { response: "Tests passed" });
+  await store.update("/work", goal.id, "completed", "Verified tests");
+  assert.equal((await store.get("/work", goal.id)).runs?.length, 2);
+});
+
+test("simultaneous reservations create only one run", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "devspace-goals-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new GoalStore(directory);
+  const goal = await store.create("/work", "Review", ["No blockers"]);
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 4 }, () => new GoalStore(directory).reserveRun("/work", goal.id, "codex")),
+  );
+  assert.equal(attempts.filter((r) => r.status === "fulfilled").length, 1);
+  assert.equal((await store.get("/work", goal.id)).runs?.length, 1);
+});

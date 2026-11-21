@@ -8,11 +8,14 @@ orchestrator), not a hidden background agent or an autonomous worker.
 
 1. Call `open_workspace` and keep its `workspace_id`.
 2. Call `create_goal` with a title and observable `success_criteria`.
-3. Use DevSpace's regular tools, subagents, and tests to perform the work.
+3. Optionally call `run_goal` with an enabled agent target (for example
+   `codex`) to dispatch **one bounded agent turn** into DevSpace's existing
+   local agent daemon. A run is not an unlimited autonomous loop.
 4. After meaningful work, call `update_goal` with `status: "active"` and
    an evidence-based progress message.
 5. Call `goal_status` or `list_goals` after reconnecting to recover context.
-6. To stop, set `status: "paused"`; to resume, set `status: "active"`.
+6. To stop an executing goal, call `stop_goal` (`paused` or `cancelled`).
+   To resume a paused goal, call `update_goal` with `status: "active"`.
    Mark a goal `completed` only after validating every criterion, or
    `cancelled` to close it without completion.
 
@@ -26,7 +29,8 @@ record evidence and status, and finish only after verifying the criteria.
 
 **Important:** `/goal` is not a native ChatGPT slash command supplied by MCP.
 The user-facing command syntax depends on the MCP host. The MCP tools
-`create_goal`, `goal_status`, `list_goals`, and `update_goal` are portable.
+`create_goal`, `goal_status`, `list_goals`, `update_goal`, `run_goal`,
+and `stop_goal` are portable.
 
 ## Persistence and boundaries
 
@@ -35,6 +39,11 @@ SHA-256 hash of the canonical workspace root obtained from the existing
 `WorkspaceRegistry`. No model credentials are stored. Goal IDs are UUIDs and
 all goal tools first resolve an authorized workspace.
 
-Goals do **not** execute on their own when the MCP host disconnects. For true
-unattended execution a separately authenticated agent runtime, bounded task
-budgets, cancellation, and recovery semantics would need to be designed.
+An explicitly dispatched `run_goal` turn executes in the existing DevSpace
+local agent daemon and can continue after the MCP client disconnects. Agent
+progress is reconciled through `goal_status`. Each goal allows at most five
+agent turns; a goal is never marked complete based only on the agent response.
+Goal status remains `active` until the host verifies the criteria and marks
+it `completed`. Only one run per goal may be active at a time. For an
+indefinite autonomous planning/retry loop a separate security review, execution
+budget, and scheduler would still be required.

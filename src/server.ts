@@ -53,6 +53,8 @@ import { formatPathForPrompt } from "./skills.js";
 import { DEVSPACE_VERSION } from "./version.js";
 import { createWorkspaceStore } from "./workspace-store.js";
 import { GoalStore, type GoalStatus } from "./goal-store.js";
+import { GoalRunner } from "./goal-runner.js";
+import { createLocalAgentClient } from "./local-agent-client.js";
 import { WorkspaceActivityJournal } from "./workspace-activity-journal.js";
 import { WorkspaceActivityStore } from "./workspace-activity-store.js";
 import { createWorkspaceWebRouter, WORKSPACE_WEB_PATH, workspaceWebUrl } from "./workspace-web.js";
@@ -858,6 +860,7 @@ function registerMcpSurface(
   // Host-driven goals persist across MCP connections without starting an
   // unobservable agent loop or bypassing existing workspace permissions.
   const goals = new GoalStore();
+  const goalRunner = new GoalRunner(goals, createLocalAgentClient(config));
   const goalResponse = (value: unknown) => {
     const result = JSON.stringify(value, null, 2);
     return { content: [textBlock(result)], structuredContent: { result } };
@@ -899,7 +902,7 @@ function registerMcpSurface(
     annotations: { readOnlyHint: true },
   }, async ({ workspace_id, goal_id }) => {
     const workspace = await workspaces.getWorkspace(workspace_id);
-    return goalResponse(await goals.get(workspace.root, goal_id));
+    return goalResponse(await goalRunner.observe(workspace.root, goal_id));
   });
 
   internalTarget.registerTool("update_goal", {
@@ -915,6 +918,35 @@ function registerMcpSurface(
   }, async ({ workspace_id, goal_id, status, message }) => {
     const workspace = await workspaces.getWorkspace(workspace_id);
     return goalResponse(await goals.update(workspace.root, goal_id, status as GoalStatus, message));
+  });
+
+  internalTarget.registerTool("run_goal", {
+    title: "Run a bounded goal agent",
+    description: "Start one inspectable subagent turn using the configured DevSpace agent daemon. Maximum five turns per goal. It may continue after the MCP request disconnects; call goal_status to inspect. Never launches an unlimited loop; completion needs host verification.",
+    inputSchema: {
+      workspace_id: z.string().describe(workspaceIdDescription),
+      goal_id: z.string().uuid(),
+      target: z.string().trim().min(1).max(128).describe("An enabled local subagent provider or profile (e.g. codex)."),
+      write_mode: z.enum(["read_only", "allowed"]).default("allowed"),
+    },
+    outputSchema: resultOutputSchema(),
+  }, async ({ workspace_id, goal_id, target, write_mode }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goalRunner.run(workspace.root, goal_id, target, write_mode));
+  });
+
+  internalTarget.registerTool("stop_goal", {
+    title: "Stop goal agent",
+    description: "Stop the active goal agent, verify it stopped, then pause or cancel the goal. Does not terminate unrelated agents.",
+    inputSchema: {
+      workspace_id: z.string().describe(workspaceIdDescription),
+      goal_id: z.string().uuid(),
+      disposition: z.enum(["paused", "cancelled"]).default("paused"),
+    },
+    outputSchema: resultOutputSchema(),
+  }, async ({ workspace_id, goal_id, disposition }) => {
+    const workspace = await workspaces.getWorkspace(workspace_id);
+    return goalResponse(await goalRunner.stop(workspace.root, goal_id, disposition));
   });
 
   if (codeModeExecutions) {

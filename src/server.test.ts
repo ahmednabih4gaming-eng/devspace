@@ -54,6 +54,9 @@ test("tool surfaces expose the expected host-facing tools", async (t) => {
       expected: ["open_workspace", "read", "apply_patch", "exec_command", "write_stdin", "show_changes"],
     },
   ];
+  const goalTools = [
+    "create_goal", "goal_status", "list_goals", "run_goal", "stop_goal", "update_goal",
+  ];
 
   for (const { surface, expected } of cases) {
     await t.test(surface, async (nested) => {
@@ -62,7 +65,7 @@ test("tool surfaces expose the expected host-facing tools", async (t) => {
 
       assert.deepEqual(
         tools.tools.map((tool) => tool.name).sort(),
-        expected.sort(),
+        [...expected, ...goalTools].sort(),
       );
     });
   }
